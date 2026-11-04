@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Git heatmap">
+  <rect width="512" height="512" rx="112" fill="#4d6bfe"/>
+  <g fill="#ffffff">
+    <g opacity="0.22">
+      <rect x="96" y="96" width="56" height="56" rx="12"/>
+      <rect x="168" y="96" width="56" height="56" rx="12"/>
+      <rect x="240" y="96" width="56" height="56" rx="12"/>
+      <rect x="312" y="96" width="56" height="56" rx="12"/>
+      <rect x="384" y="96" width="56" height="56" rx="12"/>
+      <rect x="96" y="228" width="56" height="56" rx="12"/>
+      <rect x="240" y="228" width="56" height="56" rx="12"/>
+      <rect x="312" y="228" width="56" height="56" rx="12"/>
+      <rect x="96" y="360" width="56" height="56" rx="12"/>
+      <rect x="240" y="360" width="56" height="56" rx="12"/>
+      <rect x="384" y="360" width="56" height="56" rx="12"/>
+    </g>
+    <g opacity="0.55">
+      <rect x="168" y="168" width="56" height="56" rx="12"/>
+      <rect x="384" y="168" width="56" height="56" rx="12"/>
+      <rect x="168" y="300" width="56" height="56" rx="12"/>
+      <rect x="312" y="300" width="56" height="56" rx="12"/>
+    </g>
+    <g opacity="0.95">
+      <rect x="240" y="168" width="56" height="56" rx="12"/>
+      <rect x="312" y="168" width="56" height="56" rx="12"/>
+      <rect x="96" y="300" width="56" height="56" rx="12"/>
+      <rect x="240" y="300" width="56" height="56" rx="12"/>
+      <rect x="168" y="360" width="56" height="56" rx="12"/>
+      <rect x="312" y="360" width="56" height="56" rx="12"/>
+    </g>
+  </g>
+</svg>

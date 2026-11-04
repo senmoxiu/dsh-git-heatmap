@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Git heatmap",
+    "description": "Local repositories' commits as a GitHub-style contribution grid."
+  }
+}
