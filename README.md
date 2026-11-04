@@ -50,6 +50,17 @@ dsh plugin --profile desktop add link:"$(pwd)"
 - **侧栏图标必须带 `data-dsh-panel-entry={PANEL_ID}`**：皮肤层（含 better-sidebar）靠这个语义锚点识别面板归属。
 - **颜色只走 `--dsw-*` 变量**：深浅色由 `body[data-ds-dark-theme]` 决定，不要用 JS 分支判断主题。
 
+## 与 `dsh-better-sidebar` 共存
+
+本 profile 同时装着 `dsh-better-sidebar`。有据可查的结论（见 `research/04-sidebar-adapt.md`）：
+
+- 它**不碰左侧栏**：自己挂一个 `position:fixed; pointer-events:none` 的浮层到 `document.body`，只渲染「底部工作台」；`sidebar.panellist` 与 `main` 两个席位在它源码里 **0 命中**，也没有任何官方 slot 替换。
+- 它确实维护一份「面板 id → 图标」注册表（`TabDescriptor`），但下游只有**右侧栏 tab** 与**底部工作台**——往那张表里注册永远不会变成左侧栏图标。左侧栏只有 `panellist` 一条路。
+- 它不读 `data-dsh-panel-entry`（全包 0 命中），所以本插件带这个属性只是给皮肤层用，与它无关。
+- **唯一真实交叠**是中列高度：它给中列打 `margin-bottom: var(--dsh-sidebar-height)`，底部工作台展开时整页会被压缩（不是遮挡）。对策只有一条——页面根容器 `min-height: 0` + 自己滚动，已落在 `.ghm-page` 上。
+
+因此**不需要**往它的 slot 注册、不需要 `inject: 'betterSidebar'`、也不需要在它的设置页里配置任何东西。
+
 ## 路线图
 
 | 里程碑 | 内容 | 状态 |
