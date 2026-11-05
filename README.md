@@ -35,6 +35,10 @@ lib/client.js       浏览器半：sidebar.panellist 图标 + main 整页
 
 ## 配置
 
+**日常都用面板改，不用碰文件**：插件页面顶部有两个 tab ——「热力图 / 设置」。设置页里能填 GitHub/Gitee 用户名与令牌、代理、扫描根、邮箱别名、时区、周数、并发、缓存 TTL，以及外观（调色板三选一 + 自定义四色 + 空格子色、分级方式分位/绝对值）。
+
+下面的 JSON 只是面板背后的存储，直接编辑同样有效（宿主按 mtime 重读，改完下一次请求生效）。
+
 配置文件在 **`$DSH_HOME/git-heatmap.json`**（没有 `DSH_HOME` 时是 `~/.dsh/git-heatmap.json`），首次保存时自动创建：
 
 ```json
