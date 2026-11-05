@@ -31,6 +31,7 @@ lib/client.js       浏览器半：sidebar.panellist 图标 + main 整页
 | `POST git-heat/config/save` | 写入配置（字段级校验，非法字段忽略而非重置），立即生效并清缓存 |
 | `POST git-heat/probe` | M0 探针：在宿主进程里跑 `git --version`，返回是否成功、版本、耗时、argv[0]、cwd、stderr |
 | `POST git-heat/heat` | 热力图模型：仓库清单 + 按日聚合 + 本人提交列表；`{"refresh":true}` 绕过缓存 |
+| `POST git-heat/remote` | 远程源探针：GitHub / Gitee 各自「未配置 / 令牌无效 / 可用」及告警 |
 
 ## 配置
 
@@ -45,10 +46,15 @@ lib/client.js       浏览器半：sidebar.panellist 图标 + main 整页
     "names": ["森修", "senxiu"]
   },
   "timezone": "Asia/Shanghai",
-  "weeks": 53,
+  "weeks": 104,
   "maxDepth": 6,
   "ttlSeconds": 300,
-  "concurrency": 10
+  "concurrency": 10,
+  "proxyUrl": "",
+  "remotes": {
+    "github": { "login": "senmoxiu", "enabled": true },
+    "gitee": { "login": "", "enabled": false }
+  }
 }
 ```
 
@@ -57,6 +63,23 @@ lib/client.js       浏览器半：sidebar.panellist 图标 + main 整页
 - **为什么不用 Schemastery `Config`**：本插件是 symlink 装的，realpath 在 profile 之外，`import '@deepseek-ai/schemastery'` 解析不到；JSON 文件让它保持零运行时依赖。
 
 **`roots` 是权限边界**：只有这里列出的目录会被扫描，扫描本身只读；路径会先 `realpath` 再逐层遍历。
+
+## GitHub / Gitee 远程贡献
+
+本地仓库之外，还能把托管平台的贡献合并进同一张网格。
+
+**令牌不放配置文件**：只从环境变量读 —— GitHub 用 `GITHUB_TOKEN` 或 `GH_TOKEN`，Gitee 用 `GITEE_TOKEN`。配置里只有用户名。
+
+| 能力 | 有令牌 | 无令牌 |
+|---|---|---|
+| GitHub | GraphQL `contributionsCollection`，**精确**日历（含私有仓库） | REST 公开事件流：最近约 90 天、最多 300 条，**按 push 计数**（GitHub 的 PushEvent 已不携带提交数，实测 payload 只有 `before/head/push_id/ref/repository_id`） |
+| Gitee | `/users/{login}/events`（需 token） | `/users/{login}/events/public`：最近 100 条，`size` **等于提交数**（243/243 实测），但 `page` 参数无效、匿名容易 403 限流 |
+
+合并规则：
+- `days[].count` = 本地 + 远程；`local` 与 `remote: {github?, gitee?}` 保留明细供 tooltip 拆分
+- 只有远程贡献的日期也会出现在 `days[]` 里（`local: 0`、`repo` 为空）
+- **远程不受仓库筛选影响**（它本来就不属于任何仓库）
+- 某个来源不可用（未配置 / 限流 / 404）只会变成 `remoteStatus[]` 里的一行错误，**不影响本地结果，也不会让页面失败**
 
 ## 统计口径
 
