@@ -27,17 +27,44 @@ lib/client.js       浏览器半：sidebar.panellist 图标 + main 整页
 
 | 路由 | 说明 |
 |---|---|
-| `POST git-heat/config` | 静态配置视图：扫描根、身份别名、时区、周数、缓存 TTL |
+| `POST git-heat/config` | 当前生效配置：扫描根、身份别名、时区、周数、并发、TTL、配置文件路径与来源（`defaults` / `file`） |
+| `POST git-heat/config/save` | 写入配置（字段级校验，非法字段忽略而非重置），立即生效并清缓存 |
 | `POST git-heat/probe` | M0 探针：在宿主进程里跑 `git --version`，返回是否成功、版本、耗时、argv[0]、cwd、stderr |
 | `POST git-heat/heat` | 热力图模型：仓库清单 + 按日聚合 + 本人提交列表；`{"refresh":true}` 绕过缓存 |
 
+## 配置
+
+配置文件在 **`$DSH_HOME/git-heatmap.json`**（没有 `DSH_HOME` 时是 `~/.dsh/git-heatmap.json`），首次保存时自动创建：
+
+```json
+{
+  "roots": ["D:/项目", "D:/笔记"],
+  "identity": {
+    "primaryEmail": "2801251352@qq.com",
+    "aliases": ["2801251352@qq.com"],
+    "names": ["森修", "senxiu"]
+  },
+  "timezone": "Asia/Shanghai",
+  "weeks": 53,
+  "maxDepth": 6,
+  "ttlSeconds": 300,
+  "concurrency": 10
+}
+```
+
+- 也可以直接改这个文件：宿主每次请求都会 stat 一次 mtime，**改完下一次请求就生效，不用重启也不用重装**。
+- 也能通过 `POST git-heat/config/save` 写入（局部字段即可），非法字段会被忽略并保留原值。
+- **为什么不用 Schemastery `Config`**：本插件是 symlink 装的，realpath 在 profile 之外，`import '@deepseek-ai/schemastery'` 解析不到；JSON 文件让它保持零运行时依赖。
+
+**`roots` 是权限边界**：只有这里列出的目录会被扫描，扫描本身只读；路径会先 `realpath` 再逐层遍历。
+
 ## 统计口径
 
-- **只算本人**：author email 必须命中 `IDENTITY.aliases`。本机实测 23929 条提交里只有 689 条是这个邮箱 —— 不筛的话 97% 的绿色是别人的。
+- **只算本人**：author email 必须命中 `identity.aliases`。本机实测 23941 条提交里只有 695 条是这个邮箱 —— 不筛的话 97% 的绿色是别人的。
 - **全分支**：`git log --all` 天然按 SHA 去重。**绝不逐分支相加**：某 8 分支仓库逐分支加总 5793 条，`--all` 只有 856 条。
-- **归日固定 `Asia/Shanghai`**：只认 `%at`（epoch 秒）。`%aI` 在本机有 1048 条以 `Z` 结尾，切字符串偏移会算出 NaN；22.8% 的提交「作者本地日 ≠ 上海日」。
-- **口径收敛到网格窗口**：`days` / `stats.commitCountMine` / 色阶阈值只算 53 周窗口内的，否则「总提交」会对不上读者能数出的格子；全时段数字在 `stats.allTime`。
-- **不做增量**：全量重扫实测 250–850ms（34 个仓库），增量一次进程启动就 ~90 ms，是负优化。
+- **归日按配置的 `timezone`（默认 `Asia/Shanghai`）**：只认 `%at`（epoch 秒）。`%aI` 在本机有 1048 条以 `Z` 结尾，切字符串偏移会算出 NaN；22.8% 的提交「作者本地日 ≠ 上海日」。
+- **口径收敛到网格窗口**：`days` / `stats.commitCountMine` / 色阶阈值只算窗口内的，否则「总提交」会对不上读者能数出的格子；全时段数字在 `stats.allTime`。
+- **不做增量**：线上真机冷构建 3.6 s（34 个仓库，每仓一次 git，6 并发；并发提到 10 后约 2 s），缓存命中 0.2 s。增量一次进程启动就 ~90 ms，是负优化。
 
 客户端调用一律用**文档相对路径**（`fetch('git-heat/probe')`，无前导 `/`）：GUI 以 `<base href="./">` 提供，根绝对路径会逃出子路径部署前缀。
 
@@ -79,6 +106,7 @@ dsh plugin --profile desktop add link:"$(pwd)"
 | M2 | 数据层：仓库发现 + 身份过滤 + 按日聚合（`/git-heat/heat`） | ✅ 已实现，路由级测试全过；待重启加载 |
 | M3 | 网格上屏：真实数据 + 色阶 + tooltip | ✅ 已实现，待页面实况验证 |
 | M4 | 交互：时间窗切换、仓库过滤（过滤后重算阈值） | ⏳ |
+| P1 | 配置面：`$DSH_HOME/git-heatmap.json` + `config/save`（扫描根 / 邮箱别名 / 时区 / 周数 / 并发） | ✅ 已实现，待重启加载 |
 
 ## 相关研究
 
