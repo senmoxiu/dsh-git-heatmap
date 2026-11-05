@@ -68,7 +68,7 @@ lib/client.js       浏览器半：sidebar.panellist 图标 + main 整页
 
 本地仓库之外，还能把托管平台的贡献合并进同一张网格。
 
-**令牌不放配置文件**：只从环境变量读 —— GitHub 用 `GITHUB_TOKEN` 或 `GH_TOKEN`，Gitee 用 `GITEE_TOKEN`。配置里只有用户名。
+**令牌不放配置文件**：优先读环境变量（GitHub：`GITHUB_TOKEN` / `GH_TOKEN`，Gitee：`GITEE_TOKEN`）；没有环境变量时读可选的 `$DSH_HOME/git-heatmap.secrets.json`（`{ "github": "ghp_…", "gitee": "…" }`）。配置里只有用户名，令牌不会写进任何响应或日志。改 secrets 文件也是即时生效（按 mtime 重读），不用重启。
 
 | 能力 | 有令牌 | 无令牌 |
 |---|---|---|
