@@ -1,153 +1,119 @@
 # dsh-git-heatmap
 
-把本机多个 git 仓库的提交，渲染成 GitHub 风格的 53×7 贡献热力图，作为 DeepSeek Harness Web GUI 里的一个独立面板。
+在 [DeepSeek Harness](https://github.com) 的 Web GUI 里，把本机多个 git 仓库的提交渲染成 GitHub 风格的 53×7 贡献热力图。
 
-> 功能已完整：本地多仓库扫描、按邮箱认领、53×7 网格、时间窗（53/26/12 周 + 全部 + 自定义）、仓库多选过滤、页面内设置面板、GitHub/Gitee 远程贡献合并（GraphQL 精确 / 事件流近似）。
-> 首次安装是**空的**：插件不带任何预设路径或邮箱，先去页面里的「设置」填扫描目录和 git 邮箱。
+针对的是一个 GitHub 覆盖不到的场景：代码散落在一台机器的几十个仓库里，托管平台各不相同（GitHub / Gitee / 自建 GitLab / codeup），把「我今年到底写了多少」做成一目了然的格子。
 
-## 为什么是一个插件
+> 早期版本（v0.1.x），接口与配置项可能变动。
 
-- 浏览器跑不了 git，所以必须由一个 host 半在宿主进程里执行 `git`，浏览器半只读路由返回的 JSON。
-- 分布式版本控制的提交散落在一台机器的几十个仓库里，GitHub 只覆盖其中一小部分（本机实测 34 个仓库里只有 5 个在 GitHub），且只统计默认分支 + 绑定邮箱的提交。
-- 已有工具（`oh-my-gitstats`、`git-stats`、`heatgit` 等）都输出独立 HTML 或终端图，进不了 Harness 界面。
+## 功能
 
-## 结构
-
-```
-package.json        双面插件 manifest（exports "." → host，"./client" → 浏览器）
-cordis.patch.yml    一行 insert，把这一行挂进 profile 的 bundle 列表
-icon.svg            面板图标（原创，简单几何热力块）
-locale/{zh,en}.json 插件卡片标题与描述
-lib/index.js        host 半：/git-heat/* 路由 + 受管子进程跑 git
-lib/client.js       浏览器半：sidebar.panellist 图标 + main 整页
-```
-
-**没有构建链**：`lib/*.js` 就是发布产物。host 半是普通 ESM（只用 `node:` 内建，零运行时依赖）；浏览器半是 Harness 的模块加载器工厂格式（`window.__ModuleLoader__.load({ id, factory })`），用 `React.createElement` 而不是 JSX，所以不需要 tsc/tsdown。
-
-## 接口
-
-| 路由 | 说明 |
-|---|---|
-| `POST git-heat/config` | 当前生效配置：扫描根、身份别名、时区、周数、并发、TTL、配置文件路径与来源（`defaults` / `file`） |
-| `POST git-heat/config/save` | 写入配置（字段级校验，非法字段忽略而非重置），立即生效并清缓存 |
-| `POST git-heat/probe` | M0 探针：在宿主进程里跑 `git --version`，返回是否成功、版本、耗时、argv[0]、cwd、stderr |
-| `POST git-heat/heat` | 热力图模型：仓库清单 + 按日聚合 + 本人提交列表；`{"refresh":true}` 绕过缓存 |
-| `POST git-heat/remote` | 远程源探针：GitHub / Gitee 各自「未配置 / 令牌无效 / 可用」及告警 |
-
-## 配置
-
-**日常都用面板改，不用碰文件**：插件页面顶部有两个 tab ——「热力图 / 设置」。设置页里能填 GitHub/Gitee 用户名与令牌、代理、扫描根、邮箱别名、时区、周数、并发、缓存 TTL，以及外观（调色板三选一 + 自定义四色 + 空格子色、分级方式分位/绝对值）。
-
-下面的 JSON 只是面板背后的存储，直接编辑同样有效（宿主按 mtime 重读，改完下一次请求生效）。
-
-配置文件在 **`$DSH_HOME/git-heatmap.json`**（没有 `DSH_HOME` 时是 `~/.dsh/git-heatmap.json`），首次保存时自动创建：
-
-```json
-{
-  "roots": ["D:/code", "D:/notes"],
-  "identity": {
-    "primaryEmail": "you@example.com",
-    "aliases": ["you@example.com", "you@work.example.com"],
-    "names": ["Your Name"]
-  },
-  "timezone": "Asia/Shanghai",
-  "weeks": 104,
-  "maxDepth": 6,
-  "ttlSeconds": 300,
-  "concurrency": 10,
-  "proxyUrl": "",
-  "remotes": {
-    "github": { "login": "octocat", "enabled": true },
-    "gitee": { "login": "", "enabled": false }
-  }
-}
-```
-
-- 也可以直接改这个文件：宿主每次请求都会 stat 一次 mtime，**改完下一次请求就生效，不用重启也不用重装**。
-- 也能通过 `POST git-heat/config/save` 写入（局部字段即可），非法字段会被忽略并保留原值。
-- **为什么不用 Schemastery `Config`**：本插件是 symlink 装的，realpath 在 profile 之外，`import '@deepseek-ai/schemastery'` 解析不到；JSON 文件让它保持零运行时依赖。
-
-**`roots` 是权限边界**：只有这里列出的目录会被扫描，扫描本身只读；路径会先 `realpath` 再逐层遍历。
-
-## GitHub / Gitee 远程贡献
-
-本地仓库之外，还能把托管平台的贡献合并进同一张网格。
-
-**令牌不放配置文件**：优先读环境变量（GitHub：`GITHUB_TOKEN` / `GH_TOKEN`，Gitee：`GITEE_TOKEN`）；没有环境变量时读可选的 `$DSH_HOME/git-heatmap.secrets.json`（`{ "github": "ghp_…", "gitee": "…" }`）。配置里只有用户名，令牌不会写进任何响应或日志。改 secrets 文件也是即时生效（按 mtime 重读），不用重启。
-
-| 能力 | 有令牌 | 无令牌 |
-|---|---|---|
-| GitHub | GraphQL `contributionsCollection`，**精确**日历（含私有仓库） | REST 公开事件流：最近约 90 天、最多 300 条，**按 push 计数**（GitHub 的 PushEvent 已不携带提交数，实测 payload 只有 `before/head/push_id/ref/repository_id`） |
-| Gitee | `/users/{login}/events`（需 token） | `/users/{login}/events/public`：最近 100 条，`size` **等于提交数**（243/243 实测），但 `page` 参数无效、匿名容易 403 限流 |
-
-合并规则：
-- `days[].count` = 本地 + 远程；`local` 与 `remote: {github?, gitee?}` 保留明细供 tooltip 拆分
-- 只有远程贡献的日期也会出现在 `days[]` 里（`local: 0`、`repo` 为空）
-- **远程不受仓库筛选影响**（它本来就不属于任何仓库）
-- 某个来源不可用（未配置 / 限流 / 404）只会变成 `remoteStatus[]` 里的一行错误，**不影响本地结果，也不会让页面失败**
-
-## 统计口径
-
-- **只算本人**：author email 必须命中 `identity.aliases`。本机实测 23941 条提交里只有 695 条是这个邮箱 —— 不筛的话 97% 的绿色是别人的。
-- **全分支**：`git log --all` 天然按 SHA 去重。**绝不逐分支相加**：某 8 分支仓库逐分支加总 5793 条，`--all` 只有 856 条。
-- **归日按配置的 `timezone`（默认 `Asia/Shanghai`）**：只认 `%at`（epoch 秒）。`%aI` 在本机有 1048 条以 `Z` 结尾，切字符串偏移会算出 NaN；22.8% 的提交「作者本地日 ≠ 上海日」。
-- **口径收敛到网格窗口**：`days` / `stats.commitCountMine` / 色阶阈值只算窗口内的，否则「总提交」会对不上读者能数出的格子；全时段数字在 `stats.allTime`。
-- **不做增量**：线上真机冷构建 3.6 s（34 个仓库，每仓一次 git，6 并发；并发提到 10 后约 2 s），缓存命中 0.2 s。增量一次进程启动就 ~90 ms，是负优化。
-
-客户端调用一律用**文档相对路径**（`fetch('git-heat/probe')`，无前导 `/`）：GUI 以 `<base href="./">` 提供，根绝对路径会逃出子路径部署前缀。
+- **多仓库聚合**：递归扫描配置的目录，发现所有 git 仓库，合并成一张图
+- **只算本人**：按 author email 认领提交，避免把 fork/上游历史算成自己的
+- **时间窗**：53 / 26 / 12 周、全部历史、自定义区间
+- **仓库过滤**：勾选任意仓库组合，色阶按过滤后的分布重算
+- **可读的交互**：hover 看当天明细（本地/远程分别计数）、点击看当天提交列表、深浅色主题自动适配
+- **远程贡献**：把 GitHub / Gitee 上的贡献合并进同一张网格（可选）
+- **可配置外观**：品牌色 / GitHub 绿 / 自定义四色，色阶可按分位自适应或按绝对值固定
+- **全部在页面内设置**，不需要编辑配置文件
 
 ## 安装
 
+需要已安装 DSH，且版本 ≥ `0.2.1-rc.3`。
+
 ```bash
-# 在本仓库目录下
-dsh plugin --profile desktop add link:"$(pwd)"
+git clone https://github.com/senmoxiu/dsh-git-heatmap.git
+cd dsh-git-heatmap
+dsh plugin --profile <你的 profile 名> add link:"$(pwd)"
 ```
 
-或用 Harness 自己的 `plugin_manager`（`action: install_bundle`，`target` 传本目录绝对路径）。安装后刷新页面，左侧栏应出现「Git 热力图」入口。
+也可以让 Harness 自己的 `plugin_manager` 安装：`action: install_bundle`，`target` 传本目录绝对路径。
 
-## 设计约束（不要改坏）
+装完刷新页面，左侧栏出现「Git 热力图」图标，点开是整页。
 
-- **路由前缀是 `/git-heat`**：`/git`（prefix）与 `/git/events`（exact）已被 `@linxin666/dsh-client-ui-git-graph` 占用。
-- **Windows 上必须用 `git.exe`**：`.cmd` shim 无法被无 shell 的 spawn 启动，走 `cmd.exe` 又会展开 `--format=%H` 里的 `%`。
-- **子进程要钉 `LC_ALL=C`**：否则 zh_CN 宿主上 git 的错误信息变成中文，错误分类全部失效。
-- **两处注册都要走 `slots.inject`**：裸 `register` 在没声明该席位的 shell 上会抛错，表现为「插件没有激活」。
-- **侧栏图标必须带 `data-dsh-panel-entry={PANEL_ID}`**：皮肤层（含 better-sidebar）靠这个语义锚点识别面板归属。
-- **颜色只走 `--dsw-*` 变量**：深浅色由 `body[data-ds-dark-theme]` 决定，不要用 JS 分支判断主题。
+## 首次使用
 
-## 与 `dsh-better-sidebar` 共存
+插件**不带任何预设**——没有内置路径，也没有内置邮箱。所以刚装上是空的，页面顶部会提示去配置。
 
-本 profile 同时装着 `dsh-better-sidebar`。有据可查的结论：
+打开页面右上「设置」，至少填两项：
 
-- 它**不碰左侧栏**：自己挂一个 `position:fixed; pointer-events:none` 的浮层到 `document.body`，只渲染「底部工作台」；`sidebar.panellist` 与 `main` 两个席位在它源码里 **0 命中**，也没有任何官方 slot 替换。
-- 它确实维护一份「面板 id → 图标」注册表（`TabDescriptor`），但下游只有**右侧栏 tab** 与**底部工作台**——往那张表里注册永远不会变成左侧栏图标。左侧栏只有 `panellist` 一条路。
-- 它不读 `data-dsh-panel-entry`（全包 0 命中），所以本插件带这个属性只是给皮肤层用，与它无关。
-- **唯一真实交叠**是中列高度：它给中列打 `margin-bottom: var(--dsh-sidebar-height)`，底部工作台展开时整页会被压缩（不是遮挡）。对策只有一条——页面根容器 `min-height: 0` + 自己滚动，已落在 `.ghm-page` 上。
+| 项 | 说明 |
+|---|---|
+| **扫描根** | 一行一个目录，插件在这些目录下递归找 git 仓库（深度 6 层，自动跳过 `node_modules` 等） |
+| **邮箱别名** | 你提交时用的 author email，一行一个。**只统计命中的邮箱** |
 
-因此**不需要**往它的 slot 注册、不需要 `inject: 'betterSidebar'`、也不需要在它的设置页里配置任何东西。
+填完点「保存并刷新」即可。这两项也是权限边界：不在扫描根里的目录不会被读取，扫描只读不写。
 
-## 路线图
+## GitHub / Gitee 远程贡献（可选）
 
-| 里程碑 | 内容 | 状态 |
+在设置页填用户名与令牌并勾选「启用」，托管平台上的贡献会合并进同一张网格。
+
+**令牌存在哪**：优先环境变量（GitHub：`GITHUB_TOKEN` / `GH_TOKEN`，Gitee：`GITEE_TOKEN`）；没有则读 `$DSH_HOME/git-heatmap.secrets.json`（面板里填的令牌就写在这里，权限 `0600`）。令牌不会出现在任何接口响应或日志里，配置视图只回一个「已设置」布尔值。
+
+|  | 有令牌 | 无令牌 |
 |---|---|---|
-| M0 | 宿主进程 spawn git 探针 | ✅ 已验证（git 2.53.0，311–429 ms） |
-| M1 | 可安装空壳：侧栏入口 + 整页 + 路由 | ✅ 已验证（`application: applied`，路由 200） |
-| M2 | 数据层：仓库发现 + 身份过滤 + 按日聚合（`/git-heat/heat`） | ✅ 已验证（实测 34 仓 / 本人 700 条） |
-| M3 | 网格上屏：真实数据 + 色阶 + tooltip | ✅ 已验证 |
-| M4 | 交互：时间窗（含全部/自定义）、仓库过滤、阈值重算 | ✅ 已验证 |
-| P1 | 设置面板：扫描根 / 邮箱 / 时区 / 周数 / 并发 / 调色板 / 分级 | ✅ 已验证 |
-| P2 | GitHub / Gitee 远程贡献合并 | ✅ 已验证（GitHub GraphQL 27 天、Gitee 事件流 25 天） |
+| GitHub | GraphQL `contributionsCollection`，精确日历，含私有仓库 | 公开事件流：约 90 天、最多 300 条，**按 push 计数**（GitHub 已不在 PushEvent 里带提交数） |
+| Gitee | `/users/{login}/events` | `/users/{login}/events/public`：最近 100 条，容易触发限流 |
 
-## 设计取舍（为什么是这样）
+长度限制带来两个已知偏差，页面上会以告警形式显示：GitHub 的接口单次最长 1 年（本插件按年切分后并发请求再合并）；Gitee 的匿名事件流不支持翻页。
 
-- **只统计本人**：author email 必须命中配置里的别名表。实测一台机器上 23933 条提交里只有 694 条属于本人 —— 不筛的话 97% 的格子是别人的。
-- **全分支 + 全局去重**：`git log --all` 天然按 SHA 去重。绝不逐分支相加：某 8 分支仓库逐分支加总 5793 条，`--all` 只有 856 条。
-- **归日只认 `%at`**：`%aI` 在部分提交上以 `Z` 结尾，切偏移会算出 NaN；本机 22.8% 的提交换时区后会跨天。
-- **不做增量**：34 个仓库全量重扫约 1.5–2 秒，增量一次进程启动就 ~90ms，是负优化。
-- **宿主进程跑 git**：浏览器没有进程能力，也不该有；所有 git 事实由 host 半产出，浏览器只读 JSON。
+某个来源不可用（未配置 / 限流 / 用户不存在）只会变成状态行里的一行提示，不影响本地统计。
 
+## 统计口径
+
+- **按邮箱认领**：author email 必须命中别名表。一台真实机器上 23,933 条提交里只有 694 条属于本人——不筛的话 97% 的格子是别人的。
+- **全分支 + 全局去重**：`git log --all` 天然按 SHA 去重。不要逐分支相加：某 8 分支仓库逐分支加总 5,793 条，`--all` 只有 856 条。
+- **归日按配置时区**：只认 `%at`（epoch 秒）再按 `Asia/Shanghai` 之类的时区换算，不解析 `%aI` 自带的偏移（部分提交以 `Z` 结尾会算错）。
+- **口径收敛到网格窗口**：卡片上的「总提交 / 活跃天数 / 最长连续 / 最忙一天」只算当前窗口内，否则数字会对不上格子里数出来的；全时段数字另存于 `stats.allTime`。
+- **不做增量**：几十个仓库全量重扫约 1.5–2 秒，增量每次进程启动就要 ~90 ms，是负优化。结果缓存 5 分钟。
+
+## 数据与隐私
+
+- 所有 git 读取都在本机宿主进程内完成，仓库路径、提交信息**不会上传**
+- 远程贡献只在启用后请求对应平台，且只取「某用户某区间的每日贡献计数」
+- 扫描根之外的目录不会被读取
+- 令牌只进内存与本地 secrets 文件，不写日志、不回显
+
+## 已知限制
+
+- **Gitee 覆盖不完整**：匿名接口只给最近 100 条事件且不支持翻页，更早的日期会缺失
+- **GitHub 无令牌时数字偏小**：公开事件流按 push 计，不等于提交数，且只覆盖约 90 天
+- **Windows 依赖 `git.exe`**：`.cmd` shim 无法被无 shell 的 spawn 启动，见下方开发说明
+- 早期版本，未做 i18n（界面文案中文，插件卡片标题与描述提供中英两份）
+
+## 开发
+
+**没有构建链**：`lib/*.js` 就是发布产物。
+
+```
+package.json        双面插件 manifest（exports "." → host，"./client" → 浏览器）
+cordis.patch.yml    一行 insert，挂进 profile 的 bundle 列表
+lib/index.js        host 半：/git-heat/* 路由 + 受管子进程跑 git
+lib/remotes.js      远程适配器：GitHub GraphQL / Gitee events（按 mtime 热重载）
+lib/client.js       浏览器半：侧栏图标 + 整页（React.createElement，非 JSX）
+locale/{zh,en}.json 插件卡片标题与描述
+```
+
+host 半是普通 ESM，只用 `node:` 内建，零运行时依赖；浏览器半是 Harness 的模块加载器工厂格式（`window.__ModuleLoader__.load({ id, factory })`）。
+
+### 接口
+
+| 路由 | 说明 |
+|---|---|
+| `POST git-heat/heat` | 热力图模型：仓库清单 + 按日聚合 + 本人提交列表；`{"refresh":true}` 绕过缓存 |
+| `POST git-heat/config` | 当前生效配置（不含令牌） |
+| `POST git-heat/config/save` | 局部写入配置；字段级校验，非法字段忽略并保留原值 |
+| `POST git-heat/probe` | 在宿主进程里跑 `git --version`，用于排查 git 不可用 |
+| `POST git-heat/remote` | 远程源探针：每个平台「未配置 / 令牌无效 / 可用」及告警 |
+
+### 改动时注意
+
+- **路由前缀是 `/git-heat`**：不要用 `/git`，会和 git-graph 类插件冲突
+- **两处 UI 注册都要走 `slots.inject`**：裸 `register` 在没声明该席位的 shell 上会抛错，表现为「插件没有激活」
+- **侧栏图标带 `data-dsh-panel-entry`**：皮肤层靠这个语义锚点识别面板归属
+- **Windows 上必须写 `git.exe`**，且子进程要钉 `LC_ALL=C`（否则 zh_CN 宿主上 git 报错变中文，错误分类失效）
+- **颜色只用 `--dsw-*` 变量**：深浅色由 `body[data-ds-dark-theme]` 决定，不要用 JS 判断主题
 
 ## 许可
 
-Apache-2.0
-
-
+[Apache-2.0](LICENSE)
