@@ -2,7 +2,8 @@
 
 把本机多个 git 仓库的提交，渲染成 GitHub 风格的 53×7 贡献热力图，作为 DeepSeek Harness Web GUI 里的一个独立面板。
 
-> 当前阶段：**M2/M3（数据层 + 网格已实现）**。宿主侧 `/git-heat/heat` 会扫描配置根下全部 34 个仓库、按邮箱认领本人提交、按日聚合成 53 周窗口；浏览器侧渲染网格与统计卡。改动 `lib/*.js` 后需重载插件行（重启一次进程）才会生效。
+> 功能已完整：本地多仓库扫描、按邮箱认领、53×7 网格、时间窗（53/26/12 周 + 全部 + 自定义）、仓库多选过滤、页面内设置面板、GitHub/Gitee 远程贡献合并（GraphQL 精确 / 事件流近似）。
+> 首次安装是**空的**：插件不带任何预设路径或邮箱，先去页面里的「设置」填扫描目录和 git 邮箱。
 
 ## 为什么是一个插件
 
@@ -43,11 +44,11 @@ lib/client.js       浏览器半：sidebar.panellist 图标 + main 整页
 
 ```json
 {
-  "roots": ["D:/项目", "D:/笔记"],
+  "roots": ["D:/code", "D:/notes"],
   "identity": {
-    "primaryEmail": "2801251352@qq.com",
-    "aliases": ["2801251352@qq.com"],
-    "names": ["森修", "senxiu"]
+    "primaryEmail": "you@example.com",
+    "aliases": ["you@example.com", "you@work.example.com"],
+    "names": ["Your Name"]
   },
   "timezone": "Asia/Shanghai",
   "weeks": 104,
@@ -56,7 +57,7 @@ lib/client.js       浏览器半：sidebar.panellist 图标 + main 整页
   "concurrency": 10,
   "proxyUrl": "",
   "remotes": {
-    "github": { "login": "senmoxiu", "enabled": true },
+    "github": { "login": "octocat", "enabled": true },
     "gitee": { "login": "", "enabled": false }
   }
 }
@@ -115,7 +116,7 @@ dsh plugin --profile desktop add link:"$(pwd)"
 
 ## 与 `dsh-better-sidebar` 共存
 
-本 profile 同时装着 `dsh-better-sidebar`。有据可查的结论（见 `research/04-sidebar-adapt.md`）：
+本 profile 同时装着 `dsh-better-sidebar`。有据可查的结论：
 
 - 它**不碰左侧栏**：自己挂一个 `position:fixed; pointer-events:none` 的浮层到 `document.body`，只渲染「底部工作台」；`sidebar.panellist` 与 `main` 两个席位在它源码里 **0 命中**，也没有任何官方 slot 替换。
 - 它确实维护一份「面板 id → 图标」注册表（`TabDescriptor`），但下游只有**右侧栏 tab** 与**底部工作台**——往那张表里注册永远不会变成左侧栏图标。左侧栏只有 `panellist` 一条路。
@@ -128,22 +129,25 @@ dsh plugin --profile desktop add link:"$(pwd)"
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
-| M0 | 宿主进程 spawn git 探针 | ✅ 已装机验证（git 2.53.0，311–429 ms） |
-| M1 | 可安装空壳：侧栏入口 + 整页 + 路由 | ✅ 已装机验证（`application: applied`，路由 200） |
-| M2 | 数据层：仓库发现 + 身份过滤 + 按日聚合（`/git-heat/heat`） | ✅ 已实现，路由级测试全过；待重启加载 |
-| M3 | 网格上屏：真实数据 + 色阶 + tooltip | ✅ 已实现，待页面实况验证 |
-| M4 | 交互：时间窗切换、仓库过滤（过滤后重算阈值） | ⏳ |
-| P1 | 配置面：`$DSH_HOME/git-heatmap.json` + `config/save`（扫描根 / 邮箱别名 / 时区 / 周数 / 并发） | ✅ 已实现，待重启加载 |
+| M0 | 宿主进程 spawn git 探针 | ✅ 已验证（git 2.53.0，311–429 ms） |
+| M1 | 可安装空壳：侧栏入口 + 整页 + 路由 | ✅ 已验证（`application: applied`，路由 200） |
+| M2 | 数据层：仓库发现 + 身份过滤 + 按日聚合（`/git-heat/heat`） | ✅ 已验证（实测 34 仓 / 本人 700 条） |
+| M3 | 网格上屏：真实数据 + 色阶 + tooltip | ✅ 已验证 |
+| M4 | 交互：时间窗（含全部/自定义）、仓库过滤、阈值重算 | ✅ 已验证 |
+| P1 | 设置面板：扫描根 / 邮箱 / 时区 / 周数 / 并发 / 调色板 / 分级 | ✅ 已验证 |
+| P2 | GitHub / Gitee 远程贡献合并 | ✅ 已验证（GitHub GraphQL 27 天、Gitee 事件流 25 天） |
 
-## 相关研究
+## 设计取舍（为什么是这样）
 
-设计依据见上级目录：
+- **只统计本人**：author email 必须命中配置里的别名表。实测一台机器上 23933 条提交里只有 694 条属于本人 —— 不筛的话 97% 的格子是别人的。
+- **全分支 + 全局去重**：`git log --all` 天然按 SHA 去重。绝不逐分支相加：某 8 分支仓库逐分支加总 5793 条，`--all` 只有 856 条。
+- **归日只认 `%at`**：`%aI` 在部分提交上以 `Z` 结尾，切偏移会算出 NaN；本机 22.8% 的提交换时区后会跨天。
+- **不做增量**：34 个仓库全量重扫约 1.5–2 秒，增量一次进程启动就 ~90ms，是负优化。
+- **宿主进程跑 git**：浏览器没有进程能力，也不该有；所有 git 事实由 host 半产出，浏览器只读 JSON。
 
-- `GIT-HEATMAP-插件-综合研究与施工方案.md` —— 主稿（口径决策、架构、数据模型、施工计划）
-- `research/01-plugin-api.md` —— 插件架构实证（host 路由 / slot 注册 / 安全三层）
-- `research/02-git-data.md` —— 数据层实测（34 仓库 23933 提交、去重、身份归一）
-- `research/03-ui-grid.md` —— 渲染层（53×7 算法、色阶、组件树）
 
 ## 许可
 
 Apache-2.0
+
+
