@@ -74,6 +74,23 @@ dsh plugin --profile <你的 profile 名> add link:"$(pwd)"
 - 扫描根之外的目录不会被读取
 - 令牌只进内存与本地 secrets 文件，不写日志、不回显
 
+## 权限与外部服务
+
+这个插件需要比“纯 UI 装饰”更高的能力，全部列在这里，便于人工评估。**没有任何隐藏行为**：下面就是它访问的全部边界。
+
+| 能力 | 具体用法 | 边界 |
+|---|---|---|
+| **文件读取** | 递归扫描配置的扫描根，读取目录项与 `.git` 是否存在 | 只读；只在扫描根内；符号链接不跟进 |
+| **文件写入** | 仅两个文件：`$DSH_HOME/git-heatmap.json`（配置）与 `$DSH_HOME/git-heatmap.secrets.json`（令牌，`0600`） | 不写扫描根，不写仓库 |
+| **子进程** | 只执行 `git`：`git --version` 与 `git log --all` | 不经 shell，无管道拼接；Windows 上固定 `git.exe` |
+| **网络** | 可选。仅 `api.github.com` 与 `gitee.com`，只在启用远程贡献后发起 | 只读 GET/POST 查询；支持 `proxyUrl` 配置；失败只降级为一行状态 |
+| **凭据** | 读取 `GITHUB_TOKEN` / `GH_TOKEN` / `GITEE_TOKEN` 或 secrets 文件 | 只用于上述两个域名的 `Authorization` 头；不落日志、不进响应 |
+| **动态加载** | `lib/index.js` 单向 `import('./remotes.js')`，带 `?v=<mtime>` 缓存参数实现热重载 | **同包内、单文件、路径在编译期固定**；不加载远程代码、不 `eval`、不拼装路径；文件缺失即降级为“适配器不可用” |
+
+失败边界：远程来源不可用时只影响远程部分（状态行提示），本地统计照常返回；`git` 不可用时页面显示探针失败原因；扫描目录不存在时返回空模型 + `setup` 提示，不抛异常。
+
+**没有生命周期脚本**：`package.json` 不含 `preinstall` / `install` / `postinstall` / `prepare`，安装时不执行任何代码。**零运行时依赖**：host 半只用 `node:` 内建，`@deepseek-ai/dsh` 与 `react` 为 peer 依赖（由宿主提供）。插件入口 ID 唯一：`ui-git-heatmap`。
+
 ## 已知限制
 
 - **Gitee 覆盖不完整**：匿名接口只给最近 100 条事件且不支持翻页，更早的日期会缺失

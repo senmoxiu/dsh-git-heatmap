@@ -32,7 +32,9 @@
     "lib/**/*.js",
     "cordis.patch.yml",
     "icon.svg",
-    "README.md"
+    "locale",
+    "README.md",
+    "LICENSE"
   ],
   "keywords": [
     "dsh",
@@ -43,6 +45,14 @@
     "visualization"
   ],
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/senmoxiu/dsh-git-heatmap.git"
+  },
+  "homepage": "https://github.com/senmoxiu/dsh-git-heatmap#readme",
+  "bugs": {
+    "url": "https://github.com/senmoxiu/dsh-git-heatmap/issues"
+  },
   "peerDependencies": {
     "@deepseek-ai/dsh": ">=0.2.1-rc.3",
     "react": "^18.2.0"
